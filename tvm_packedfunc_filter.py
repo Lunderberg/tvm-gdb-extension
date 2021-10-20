@@ -41,6 +41,11 @@ class PackedFuncFilter:
 
             if pyframe.is_python_evalframe():
                 frame = pyframe
+                to_elide = any(
+                    f"packages/{p}/" in pyframe.filename()
+                    for p in ["_pytest", "pluggy"]
+                )
+
             elif pyframe.is_python_frame():
                 to_elide = True
 
@@ -56,10 +61,15 @@ class PackedFuncFilter:
             ):
                 to_elide = True
 
+            # Packed function through the C API
             functions_to_skip = [
                 "TVMFuncCall(TVMFunctionHandle, TVMValue*, int*, int, TVMValue*, int*)"
             ]
             if frame.function() in functions_to_skip:
+                to_elide = True
+
+            # Intermediate calls when traversing a graph.
+            if "InitVTable" in frame.function():
                 to_elide = True
 
             if to_elide:
