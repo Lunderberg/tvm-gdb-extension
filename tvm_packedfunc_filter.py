@@ -69,7 +69,7 @@ class PackedFuncFilter:
                 to_elide = True
 
             # Intermediate calls when traversing a graph.
-            if "InitVTable" in frame.function():
+            if isinstance(frame.function(), str) and "InitVTable" in frame.function():
                 to_elide = True
 
             if to_elide:
