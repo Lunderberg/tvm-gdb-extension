@@ -213,9 +213,14 @@ class PythonFrameDecorator(FrameDecorator):
         pointer = int(val)
 
         # Call PyFrame_GetLineNumber in the inferior, using whichever
-        # pointer was found as an argument
+        # pointer was found as an argument.  The cast of the function
+        # pointer is a workaround for incorrect debug symbols
+        # (observed in python3.7-dbg in ubuntu 18.04,
+        # PyFrame_GetLineNumber showed 4 arguments instead of 1).
         line_num = gdb.parse_and_eval(
-            "PyFrame_GetLineNumber((PyFrameObject*){})".format(pointer)
+            "((int (*)(PyFrameObject*))PyFrame_GetLineNumber)((PyFrameObject*){})".format(
+                int(pointer)
+            )
         )
         return int(line_num)
 
