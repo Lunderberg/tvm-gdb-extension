@@ -126,7 +126,10 @@ class PythonFrameDecorator(FrameDecorator):
         # that has arguments optimized out on ubuntu 20.04.  Instead,
         # let's use PyEval_EvalFrameEx instead.  This is part of the
         # CPython API, so it should be more stable to find.
-        return self.gdbframe.name() == "PyEval_EvalFrameEx"
+        return self.gdbframe.name() in [
+            "_PyEval_EvalFrame",
+            "PyEval_EvalFrameEx",
+        ]
 
     def is_python_frame(self):
         """Check if this stack frame is owned by CPython
