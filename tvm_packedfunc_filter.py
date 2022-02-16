@@ -126,10 +126,7 @@ class PythonFrameDecorator(FrameDecorator):
         # that has arguments optimized out on ubuntu 20.04.  Instead,
         # let's use PyEval_EvalFrameEx instead.  This is part of the
         # CPython API, so it should be more stable to find.
-        return self.gdbframe.name() in [
-            "_PyEval_EvalFrame",
-            "PyEval_EvalFrameEx",
-        ]
+        return self.gdbframe.name() == "_PyEval_EvalFrameDefault"
 
     def is_python_frame(self):
         """Check if this stack frame is owned by CPython
@@ -183,11 +180,38 @@ class PythonFrameDecorator(FrameDecorator):
         self._pyop = pyframe.get_pyop()
         return self._pyop
 
+    def get_pyframe_argument(self):
+        frames_to_check = [self.gdbframe, self.gdbframe.older()]
+
+        def symbols(frame):
+            frame_vars = gdb.FrameDecorator.FrameVars(frame)
+            for wrapper in frame_vars.fetch_frame_args():
+                yield wrapper.sym
+            for wrapper in frame_vars.fetch_frame_locals():
+                yield wrapper.sym
+
+        for frame in frames_to_check:
+            for sym in symbols(frame):
+                if str(sym.type) == "PyFrameObject *":
+                    val = sym.value(frame)
+                    if not val.is_optimized_out:
+                        pointer = int(val)
+                        return pointer
+
+        return None
+
     def filename(self):
-        try:
+        pyframe = self.get_pyframe_argument()
+        if pyframe is not None:
+            result = gdb.parse_and_eval(
+                f"PyUnicode_AsUTF8(((PyFrameObject*){pyframe})->f_code->co_filename)"
+            )
+            return result.string()
+
+        if self.pyop is not None:
             return self.pyop.filename()
-        except AttributeError:
-            return "Unknown python file"
+
+        return "Unknown python file"
 
     def line(self):
         # This is what py-bt uses, which can return line numbers
@@ -203,29 +227,22 @@ class PythonFrameDecorator(FrameDecorator):
         # Look for the an argument passed in that has type
         # PyFrameObject*.  If it can't be found, fall back to a
         # slightly incorrect line number.
-        args = gdb.FrameDecorator.FrameVars(self.gdbframe).fetch_frame_args()
-        for wrap in args:
-            sym = wrap.sym
-            if str(sym.type) == "PyFrameObject *":
-                break
-        else:
+        pyframe = self.get_pyframe_argument()
+        if pyframe is not None:
+            # Call PyFrame_GetLineNumber in the inferior, using whichever
+            # pointer was found as an argument.  The cast of the function
+            # pointer is a workaround for incorrect debug symbols
+            # (observed in python3.7-dbg in ubuntu 18.04,
+            # PyFrame_GetLineNumber showed 4 arguments instead of 1).
+            line_num = gdb.parse_and_eval(
+                f"((int (*)(PyFrameObject*))PyFrame_GetLineNumber)((PyFrameObject*){pyframe})"
+            )
+            return int(line_num)
+
+        if self.pyop is not None:
             return self.pyop.f_lineno
 
-        # Pull out the value of that argument.
-        val = sym.value(self.gdbframe)
-        pointer = int(val)
-
-        # Call PyFrame_GetLineNumber in the inferior, using whichever
-        # pointer was found as an argument.  The cast of the function
-        # pointer is a workaround for incorrect debug symbols
-        # (observed in python3.7-dbg in ubuntu 18.04,
-        # PyFrame_GetLineNumber showed 4 arguments instead of 1).
-        line_num = gdb.parse_and_eval(
-            "((int (*)(PyFrameObject*))PyFrame_GetLineNumber)((PyFrameObject*){})".format(
-                int(pointer)
-            )
-        )
-        return int(line_num)
+        return None
 
     def frame_args(self):
         # TODO: Extract python arguments to print here.
@@ -237,10 +254,17 @@ class PythonFrameDecorator(FrameDecorator):
         return None
 
     def function(self):
-        try:
+        pyframe = self.get_pyframe_argument()
+        if pyframe is not None:
+            result = gdb.parse_and_eval(
+                f"PyUnicode_AsUTF8(((PyFrameObject*){pyframe})->f_code->co_name)"
+            )
+            return result.string()
+
+        if self.pyop is not None:
             return self.pyop.co_name.proxyval(set())
-        except AttributeError:
-            return "Unknown python function"
+
+        return "Unknown python function"
 
     def address(self):
         return None
