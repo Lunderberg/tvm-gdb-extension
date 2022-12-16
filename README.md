@@ -12,7 +12,7 @@ program to be more easily traced.
 
 - Install debug symbols for python.  (e.g. `sudo apt install pythonX.Y-dbg`)
 - Source this file in your `.gdbinit`
-  `source ~/path/to/the/tvm_packedfunc_filter.py`
+  `source ~/path/to/the/tvm-gdb-extension/source-me.py`
 
 ## Known Configuration Issues
 
