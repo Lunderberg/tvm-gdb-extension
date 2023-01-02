@@ -14,10 +14,45 @@ TODO:
 
 """
 
+import enum
+from abc import abstractmethod
+from typing import Optional
+
 import gdb
 
 
-class TVM_ObjectRef_PrettyPrinter:
+class PrettyPrintLevel(enum.Flag):
+    Disabled = 0
+    DataType = enum.auto()
+    ObjectRef = enum.auto()
+    Default = DataType
+    All = Default | ObjectRef
+
+
+class PrettyPrinter:
+    _printers = []
+
+    def __init_subclass__(cls, /, pprint_level):
+        cls.pprint_level = pprint_level
+        PrettyPrinter._printers.append(cls)
+
+    @classmethod
+    def register(cls, pprint_level):
+        for subclass in cls._printers:
+            if pprint_level & subclass.pprint_level:
+                gdb.pretty_printers.append(subclass.lookup)
+
+    @classmethod
+    @abstractmethod
+    def lookup(cls, val) -> Optional["Self"]:
+        """Return the printer that should print the value"""
+
+    @abstractmethod
+    def to_string(self) -> str:
+        """Convert the value to a string"""
+
+
+class TVM_ObjectRef(PrettyPrinter, pprint_level=PrettyPrintLevel.ObjectRef):
     @classmethod
     def lookup(cls, val):
         if val.type.code == gdb.TYPE_CODE_PTR:
@@ -62,7 +97,7 @@ class TVM_ObjectRef_PrettyPrinter:
         return parsed
 
 
-class TVM_DataType_PrettyPrinter:
+class TVM_DataType(PrettyPrinter, pprint_level=PrettyPrintLevel.DataType):
     @classmethod
     def lookup(cls, val):
         try:
@@ -95,7 +130,3 @@ class TVM_DataType_PrettyPrinter:
         dtype.lanes = values["lanes"]
 
         return repr(dtype)
-
-
-# gdb.pretty_printers.append(TVM_ObjectRef_PrettyPrinter.lookup)
-gdb.pretty_printers.append(TVM_DataType_PrettyPrinter.lookup)

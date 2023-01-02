@@ -26,10 +26,12 @@ from gdb.FrameDecorator import FrameDecorator
 
 class FilterLevel(enum.Flag):
     Disabled = 0
-    Interpreter = 1
-    Dispatch = 2
-    CommonBaseClass = 4
-    All = Interpreter | Dispatch | CommonBaseClass
+    Interpreter = enum.auto()
+    Pytest = enum.auto()
+    Dispatch = enum.auto()
+    Default = Interpreter | Pytest | Dispatch
+    CommonBaseClass = enum.auto()
+    All = Default | CommonBaseClass
 
 
 class FrameFilter:
@@ -52,53 +54,6 @@ class FrameFilter:
         self.name = "TVM_" + type(self).__name__
         self.priority = type(self).priority
         self.enabled = True
-
-
-class ElideFilter(FrameFilter, filter_level=FilterLevel.Disabled):
-    @abstractmethod
-    def _elide_frame(self, frame: Union[gdb.Frame, FrameDecorator]) -> bool:
-        """Whether the frame should be elided.
-
-        Return true if the frame should be elided as part of the previous,
-        false otherwise.
-        """
-
-    class ElidedFrameDecorator(FrameDecorator):
-        def __init__(self, frame, elided):
-            super().__init__(frame)
-            self._elided = elided
-
-        def elided(self):
-            return self._elided
-
-    def filter(self, frame_iter):
-        prev_nonelided_frame = None
-        elided_frames = []
-
-        def yield_elided():
-            nonlocal prev_nonelided_frame
-            nonlocal elided_frames
-
-            if elided_frames and prev_nonelided_frame is None:
-                yield from elided_frames
-                elided_frames = []
-            elif elided_frames and prev_nonelided_frame is not None:
-                yield self.ElidedFrameDecorator(prev_nonelided_frame, elided_frames)
-                prev_nonelided_frame = None
-                elided_frames = []
-            elif not elided_frames and prev_nonelided_frame is not None:
-                yield prev_nonelided_frame
-                prev_nonelided_frame = None
-
-        for frame in frame_iter:
-            is_pytest = self._elide_frame(frame)
-            if is_pytest:
-                elided_frames.append(frame)
-            else:
-                yield from yield_elided()
-                prev_nonelided_frame = frame
-
-        yield from yield_elided()
 
 
 class PythonFrameFilter(FrameFilter, filter_level=FilterLevel.Interpreter):
@@ -312,11 +267,54 @@ class PythonFrameDecorator(FrameDecorator):
         return None
 
 
-class PytestFrameFilter(ElideFilter, filter_level=FilterLevel.Dispatch):
-    def __init__(self):
-        super().__init__()
-        self.priority = 90  # After TVM_Python_Filter
+class ElideFilter(FrameFilter, filter_level=FilterLevel.Disabled):
+    @abstractmethod
+    def _elide_frame(self, frame: Union[gdb.Frame, FrameDecorator]) -> bool:
+        """Whether the frame should be elided.
 
+        Return true if the frame should be elided as part of the previous,
+        false otherwise.
+        """
+
+    class ElidedFrameDecorator(FrameDecorator):
+        def __init__(self, frame, elided):
+            super().__init__(frame)
+            self._elided = elided
+
+        def elided(self):
+            return self._elided
+
+    def filter(self, frame_iter):
+        prev_nonelided_frame = None
+        elided_frames = []
+
+        def yield_elided():
+            nonlocal prev_nonelided_frame
+            nonlocal elided_frames
+
+            if elided_frames and prev_nonelided_frame is None:
+                yield from elided_frames
+                elided_frames = []
+            elif elided_frames and prev_nonelided_frame is not None:
+                yield self.ElidedFrameDecorator(prev_nonelided_frame, elided_frames)
+                prev_nonelided_frame = None
+                elided_frames = []
+            elif not elided_frames and prev_nonelided_frame is not None:
+                yield prev_nonelided_frame
+                prev_nonelided_frame = None
+
+        for frame in frame_iter:
+            is_elided = self._elide_frame(frame)
+            if is_elided:
+                elided_frames.append(frame)
+            else:
+                yield from yield_elided()
+                prev_nonelided_frame = frame
+
+        yield from yield_elided()
+
+
+class PytestFrameFilter(ElideFilter, filter_level=FilterLevel.Pytest, priority=90):
     def _elide_frame(self, frame):
         filename = frame.filename()
         for package in ["_pytest", "pluggy"]:
