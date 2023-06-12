@@ -345,7 +345,9 @@ class FunctorDispatchFilter(ElideFilter, filter_level=FilterLevel.Dispatch):
         ]
 
         function = frame.function()
-        return any(re.search(regex, function) for regex in regices)
+        return isinstance(function, str) and any(
+            re.search(regex, function) for regex in regices
+        )
 
 
 class TransformationBaseClassFilter(
